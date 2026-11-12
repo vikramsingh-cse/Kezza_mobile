@@ -1,5 +1,24 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
+# Environment secrets
+.env
+**/.env
+
+# Python
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+
+# Node and Expo
+node_modules/
+.expo/
+dist/
+
+# Logs
+*.log
+
+
 # dependencies
 node_modules/
 
