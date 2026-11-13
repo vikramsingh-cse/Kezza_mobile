@@ -1,41 +1,46 @@
-/**
- * Points feature — React Query hooks.
- * Phase 5: implement when wallet endpoints are live.
- */
-
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { PointsBalance, PointsLedgerEntry, RedeemPointsBody } from './types';
+import { useAuthStore } from '@/store/auth-store';
+import { commissionKeys } from '@/features/commissions/hooks';
+import { referralKeys } from '@/features/referrals/hooks';
+import type {
+  PatientWalletInfo,
+  TreatmentPaymentCreateBody,
+  TreatmentPaymentResponse,
+} from './types';
 
 export const pointsKeys = {
-  balance: ['points', 'balance'] as const,
-  ledger: ['points', 'ledger'] as const,
+  wallet: ['wallet', 'patient'] as const,
 };
 
-export function usePointsBalance() {
+/** Patient fetches their points balance and wallet ledger */
+export function usePatientWallet() {
+  const role = useAuthStore((s) => s.user?.role);
   return useQuery({
-    queryKey: pointsKeys.balance,
-    queryFn: () =>
-      api.get<PointsBalance>('/wallet/balance').then((r) => r.data),
+    queryKey: pointsKeys.wallet,
+    queryFn: async () => {
+      const res = await api.get<PatientWalletInfo>('/wallet/patient');
+      return res.data;
+    },
+    enabled: role === 'patient',
   });
 }
 
-export function usePointsLedger() {
-  return useQuery({
-    queryKey: pointsKeys.ledger,
-    queryFn: () =>
-      api.get<PointsLedgerEntry[]>('/wallet/ledger').then((r) => r.data),
-  });
-}
-
-export function useRedeemPoints() {
+/** Patient purchases a treatment — generates points reward and agent commission */
+export function usePurchaseTreatment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: RedeemPointsBody) =>
-      api.post('/wallet/redeem', body),
+    mutationFn: async (body: TreatmentPaymentCreateBody): Promise<TreatmentPaymentResponse> => {
+      const res = await api.post<TreatmentPaymentResponse>('/payments/purchase-treatment', body);
+      return res.data;
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: pointsKeys.balance });
-      qc.invalidateQueries({ queryKey: pointsKeys.ledger });
+      // Invalidate patient wallet
+      qc.invalidateQueries({ queryKey: pointsKeys.wallet });
+      // Invalidate agent earnings & referrals in case user is testing both
+      qc.invalidateQueries({ queryKey: commissionKeys.earnings });
+      qc.invalidateQueries({ queryKey: referralKeys.agentList() });
+      qc.invalidateQueries({ queryKey: referralKeys.agentCode() });
     },
   });
 }

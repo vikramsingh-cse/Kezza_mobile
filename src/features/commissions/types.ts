@@ -1,30 +1,19 @@
-/**
- * Commissions feature — shared types.
- * Phase 6: agent network and commission tracking.
- */
-
-export type CommissionStatus = 'pending' | 'approved' | 'paid' | 'reversed';
-
-export interface CommissionBalance {
-  pendingRands: number;
-  approvedRands: number;
-  paidRands: number;
-}
-
 export interface CommissionLedgerEntry {
   id: string;
-  status: CommissionStatus;
-  amountRands: number;
-  /** Percentage tier at which commission was calculated */
-  tierPercent: number;
-  referralId: string;
-  createdAt: string;
+  tier_percent: number;
+  amount_rands: number;
+  status: string;
+  created_at: string;
+  treatment_name: string | null;
 }
 
-export interface AgentNetworkMember {
-  id: string;
-  fullName: string;
-  agentCode: string;
-  status: 'active' | 'pending_verification' | 'inactive' | 'suspended';
-  referralCount: number;
+export interface AgentEarningsInfo {
+  agent_code: string;
+  commission_tier: string;
+  tier_percent: number;
+  pending_rands: number;
+  approved_rands: number;
+  paid_rands: number;
+  total_earned_rands: number;
+  ledger: CommissionLedgerEntry[];
 }

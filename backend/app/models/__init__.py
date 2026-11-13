@@ -4,6 +4,10 @@ from app.models.branch import Branch
 from app.models.patient import Patient
 from app.models.agent import Agent
 from app.models.referral import Referral
+from app.models.payment import Payment
+from app.models.points import PointsLedger
+from app.models.commission import CommissionTier, CommissionLedger
+from app.models.otp import OtpRequest
 
 __all__ = [
     "User",
@@ -11,4 +15,9 @@ __all__ = [
     "Patient",
     "Agent",
     "Referral",
+    "Payment",
+    "PointsLedger",
+    "CommissionTier",
+    "CommissionLedger",
+    "OtpRequest",
 ]

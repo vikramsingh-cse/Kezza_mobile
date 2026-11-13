@@ -1,8 +1,3 @@
-/**
- * Referrals feature — shared types.
- * Mirrors the backend Referral model; extended in Phase 4.
- */
-
 export type ReferralStatus =
   | 'registered'
   | 'contacted'
@@ -13,18 +8,33 @@ export type ReferralStatus =
 
 export interface Referral {
   id: string;
-  patientName: string;
-  patientPhone: string;
+  patient_name: string;
+  patient_phone_e164: string;
+  referring_agent_id: string;
   status: ReferralStatus;
-  serviceInterest: string | null;
-  preferredBranchId: string | null;
-  createdAt: string;
-  convertedAt: string | null;
+  service_interest: string | null;
+  created_at: string;
+  converted_at: string | null;
 }
 
-export interface CreateReferralBody {
+export interface CreateReferralLeadBody {
   patient_name: string;
   patient_phone_e164: string;
   preferred_branch_id?: string;
   service_interest?: string;
+}
+
+export interface AgentReferralCodeInfo {
+  agent_code: string;
+  referral_link: string;
+  total_referrals: number;
+  converted_count: number;
+}
+
+export interface PatientAttributionInfo {
+  has_referral: boolean;
+  referring_agent_code?: string;
+  status?: string;
+  converted_at?: string | null;
+  message?: string;
 }

@@ -1,12 +1,5 @@
-/**
- * Tab navigator layout for the three main app tabs.
- *
- * Tab visibility can be made role-aware here — e.g. hide the
- * Referrals tab for patients — by reading from the auth store.
- */
-
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { Text, useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { useAuthStore } from '@/store/auth-store';
@@ -22,36 +15,42 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#3C9FFE',
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: { backgroundColor: colors.background },
+        tabBarStyle: {
+          backgroundColor: colors.background,
+          borderTopColor: colors.backgroundElement,
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 6,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
       }}
     >
-      {/* ── Home / Dashboard ── */}
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            // SymbolView not available here without native view context;
-            // replace with expo-symbols <SymbolView> once screens are built.
-            null
-          ),
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
         }}
       />
 
-      {/* ── Referrals (agents + patients) ── */}
       <Tabs.Screen
         name="referrals"
         options={{
           title: 'Referrals',
-          // Agents see their referral pipeline; patients see their own status.
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>👥</Text>,
         }}
       />
 
-      {/* ── Wallet / Points ── */}
       <Tabs.Screen
         name="wallet"
         options={{
           title: role === 'agent' ? 'Earnings' : 'Wallet',
+          tabBarIcon: () => (
+            <Text style={{ fontSize: 20 }}>{role === 'agent' ? '💰' : '🎁'}</Text>
+          ),
         }}
       />
     </Tabs>
