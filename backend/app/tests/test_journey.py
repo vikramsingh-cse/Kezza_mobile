@@ -10,6 +10,8 @@ Tests the complete 7-step business flow from agent referral to reward & commissi
 7. Both see their results (Patient sees credit; Agent sees commission & conversion)
 """
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 
 
@@ -18,6 +20,12 @@ def test_complete_kezza_journey(client: TestClient):
     # Step 1: Agent registers and gets unique referral code & link
     # =========================================================================
     agent_phone = "+27821110001"
+    client.post("/api/v1/auth/otp/request", json={"phone_e164": agent_phone})
+    agent_otp_res = client.post(
+        "/api/v1/auth/otp/verify",
+        json={"phone_e164": agent_phone, "otp_code": "123456"},
+    )
+    assert agent_otp_res.status_code == 200
     agent_reg_res = client.post(
         "/api/v1/auth/register",
         json={
@@ -46,6 +54,12 @@ def test_complete_kezza_journey(client: TestClient):
     # Step 2: Patient registers using agent's referral link
     # =========================================================================
     patient_phone = "+27822220002"
+    client.post("/api/v1/auth/otp/request", json={"phone_e164": patient_phone})
+    patient_otp_res = client.post(
+        "/api/v1/auth/otp/verify",
+        json={"phone_e164": patient_phone, "otp_code": "123456"},
+    )
+    assert patient_otp_res.status_code == 200
     patient_reg_res = client.post(
         "/api/v1/auth/register",
         json={
@@ -85,9 +99,10 @@ def test_complete_kezza_journey(client: TestClient):
     # Step 4, 5, 6: Patient purchases a treatment for R 1,500
     # =========================================================================
     treatment_res = client.post(
-        "/api/v1/payments/purchase-treatment",
-        headers=patient_auth_headers,
+        "/api/v1/payments/verify-collected",
+        headers={"X-Payment-Verification-Key": "test-only-payment-key-for-automated-journey"},
         json={
+            "patient_id": patient_id,
             "treatment_name": "Premium Teeth Whitening",
             "amount_rands": 1500.00,
             "payment_reference": "INV-2026-001",
@@ -102,7 +117,8 @@ def test_complete_kezza_journey(client: TestClient):
 
     # Step 6: Verify Agent received commission (10% of R1,500 = R150)
     assert treatment_data["referral_converted"] is True
-    assert treatment_data["agent_commission_rands"] == 150.00
+    # Pydantic serializes Decimal values as JSON strings to preserve precision.
+    assert Decimal(treatment_data["agent_commission_rands"]) == Decimal("150.00")
 
     # =========================================================================
     # Step 7: Both see their results!

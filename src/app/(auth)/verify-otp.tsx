@@ -22,13 +22,13 @@ const OTP_LENGTH = 6;
 
 export default function VerifyOtpScreen() {
   const theme = useTheme();
-  const { phone, ref } = useLocalSearchParams<{ phone: string; ref?: string }>();
+  const { phone, ref, devCode } = useLocalSearchParams<{ phone: string; ref?: string; devCode?: string }>();
   const pendingReferralCode = useAuthStore((s) => s.pendingReferralCode);
 
   const verifyOtpMutation = useVerifyOtp();
   const registerUserMutation = useRegisterUser();
 
-  const [otp, setOtp] = useState('123456'); // Pre-fill with dev OTP for instant testing
+  const [otp, setOtp] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Registration state if user is new
@@ -151,9 +151,11 @@ export default function VerifyOtpScreen() {
                 )}
               </Pressable>
 
-              <Text style={[styles.devHint, { color: theme.textSecondary }]}>
-                (Standard test code <Text style={{ fontWeight: '700' }}>123456</Text> is active)
-              </Text>
+              {devCode ? (
+                <Text style={[styles.devHint, { color: theme.textSecondary }]}>
+                  Local development code: <Text style={{ fontWeight: '700' }}>{devCode}</Text>
+                </Text>
+              ) : null}
             </View>
           ) : (
             /* Step 3: Fast Inline Registration */

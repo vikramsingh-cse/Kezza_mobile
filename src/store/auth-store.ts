@@ -110,7 +110,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       secureDelete(KEYS.token),
       secureDelete(KEYS.user),
     ]);
-    set({ isAuthenticated: false, accessToken: null, user: null });
+    set({ isAuthenticated: false, accessToken: null, user: null, pendingReferralCode: null });
   },
 
   setPendingReferralCode: (code: string | null) => {

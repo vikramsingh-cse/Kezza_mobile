@@ -1,19 +1,23 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class OtpRequestSchema(BaseModel):
-    phone_e164: str = Field(..., description="E.164 phone number, e.g. +27821234567")
+    phone_e164: str = Field(
+        ..., pattern=r"^\+[1-9]\d{7,14}$", description="E.164 phone number, e.g. +27821234567"
+    )
 
 
 class OtpVerifySchema(BaseModel):
-    phone_e164: str = Field(..., description="E.164 phone number")
-    otp_code: str = Field(..., description="6-digit verification code")
+    phone_e164: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    otp_code: str = Field(..., pattern=r"^\d{6}$", description="6-digit verification code")
 
 
 class UserRegisterSchema(BaseModel):
-    phone_e164: str
-    full_name: str
-    role: str = Field("patient", description="'patient' or 'agent'")
+    phone_e164: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    full_name: str = Field(..., min_length=1, max_length=150)
+    role: Literal["patient", "agent"] = "patient"
     email: str | None = None
     referral_code: str | None = Field(None, description="Optional agent referral code")
 

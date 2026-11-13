@@ -2,7 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
+import math
 import secrets
 import time
 import uuid
@@ -14,17 +14,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.config import APP_ENV, DEV_OTP_CODE, JWT_SECRET
 from app.models.agent import Agent
 from app.models.otp import OtpRequest
 from app.models.patient import Patient
 from app.models.referral import Referral
 from app.models.user import User
 
-JWT_SECRET = os.getenv("JWT_SECRET", "kezza_super_secret_jwt_key_2026")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 30  # 30 days token
 
 security = HTTPBearer(auto_error=False)
+
+OTP_LIFETIME = timedelta(minutes=10)
+OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+OTP_REQUEST_WINDOW = timedelta(minutes=15)
+OTP_MAX_REQUESTS_PER_WINDOW = 5
+
+
+class OtpRequestRateLimited(Exception):
+    def __init__(self, retry_after_seconds: int):
+        super().__init__("Too many verification codes requested. Please try again shortly.")
+        self.retry_after_seconds = max(1, retry_after_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -36,10 +47,24 @@ def _b64url_encode(data: bytes) -> str:
 
 
 def _b64url_decode(s: str) -> bytes:
-    padding = 4 - (len(s) % 4)
-    if padding != 4:
-        s += "=" * padding
-    return base64.urlsafe_b64decode(s.encode("utf-8"))
+    padding = "=" * ((4 - len(s) % 4) % 4)
+    return base64.b64decode(
+        (s + padding).encode("ascii"),
+        altchars=b"-_",
+        validate=True,
+    )
+
+
+def _otp_digest(phone_e164: str, code: str) -> str:
+    """Return a server-keyed, fixed-length digest that fits the existing column."""
+    key = hashlib.sha256(b"kezza-otp-storage\0" + JWT_SECRET.encode("utf-8")).digest()
+    message = f"{phone_e164}\0{code}".encode("utf-8")
+    return _b64url_encode(hmac.new(key, message, hashlib.sha256).digest())[:10]
+
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite drops timezone information for DateTime(timezone=True) values.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def create_access_token(payload: dict) -> str:
@@ -65,6 +90,14 @@ def decode_access_token(token: str) -> dict:
     if len(parts) != 3:
         raise ValueError("Invalid JWT format")
 
+    header = json.loads(_b64url_decode(parts[0]).decode("utf-8"))
+    if (
+        not isinstance(header, dict)
+        or header.get("alg") != JWT_ALGORITHM
+        or header.get("typ") != "JWT"
+    ):
+        raise ValueError("Invalid JWT header")
+
     unsigned_token = f"{parts[0]}.{parts[1]}"
     expected_sig = hmac.new(
         JWT_SECRET.encode("utf-8"),
@@ -78,8 +111,16 @@ def decode_access_token(token: str) -> dict:
 
     payload_bytes = _b64url_decode(parts[1])
     payload = json.loads(payload_bytes.decode("utf-8"))
-
-    if "exp" in payload and payload["exp"] < time.time():
+    if not isinstance(payload, dict) or not isinstance(payload.get("sub"), str):
+        raise ValueError("Invalid JWT claims")
+    expires_at = payload.get("exp")
+    if (
+        isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(expires_at)
+    ):
+        raise ValueError("JWT expiration is required")
+    if expires_at <= time.time():
         raise ValueError("Token has expired")
 
     return payload
@@ -94,12 +135,37 @@ def request_otp(phone_e164: str, db: Session) -> str:
     Creates an OTP record for the phone number.
     In development/testing, standard mock code '123456' is generated.
     """
-    code = "123456"
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    if APP_ENV not in {"development", "test"}:
+        raise RuntimeError("OTP delivery is unavailable: configure a production OTP provider")
+
+    now = datetime.now(timezone.utc)
+    request_times = list(db.scalars(
+        select(OtpRequest.created_at)
+        .where(
+            OtpRequest.phone_e164 == phone_e164,
+            OtpRequest.created_at >= now - OTP_REQUEST_WINDOW,
+        )
+        .order_by(OtpRequest.created_at.asc())
+    ))
+    if request_times:
+        most_recent = _as_utc(request_times[-1])
+        cooldown_remaining = math.ceil(
+            (most_recent + OTP_RESEND_COOLDOWN - now).total_seconds()
+        )
+        if cooldown_remaining > 0:
+            raise OtpRequestRateLimited(cooldown_remaining)
+        if len(request_times) >= OTP_MAX_REQUESTS_PER_WINDOW:
+            window_remaining = math.ceil(
+                (_as_utc(request_times[0]) + OTP_REQUEST_WINDOW - now).total_seconds()
+            )
+            raise OtpRequestRateLimited(window_remaining)
+
+    code = DEV_OTP_CODE
+    expires_at = now + OTP_LIFETIME
 
     otp_record = OtpRequest(
         phone_e164=phone_e164,
-        otp_code=code,
+        otp_code=_otp_digest(phone_e164, code),
         expires_at=expires_at,
         is_verified=False,
     )
@@ -111,27 +177,45 @@ def request_otp(phone_e164: str, db: Session) -> str:
 def verify_otp_code(phone_e164: str, otp_code: str, db: Session) -> bool:
     """
     Verifies that the OTP code matches for the given phone number.
-    Accepts '123456' as standard test code or valid active OTP record.
+    The fixed development code is only valid against a fresh request record.
     """
-    if otp_code == "123456":
-        return True
-
     stmt = (
         select(OtpRequest)
         .where(
             OtpRequest.phone_e164 == phone_e164,
-            OtpRequest.otp_code == otp_code,
-            OtpRequest.is_verified.is_(False),
-            OtpRequest.expires_at > datetime.now(timezone.utc),
         )
-        .order_by(OtpRequest.created_at.desc())
+        .order_by(OtpRequest.created_at.desc(), OtpRequest.id.desc())
+        .limit(1)
+        .with_for_update()
     )
     record = db.scalars(stmt).first()
-    if record:
+    candidate_digest = _otp_digest(phone_e164, otp_code)
+    if (
+        record
+        and not record.is_verified
+        and _as_utc(record.expires_at) > datetime.now(timezone.utc)
+        and hmac.compare_digest(record.otp_code, candidate_digest)
+    ):
         record.is_verified = True
         db.commit()
         return True
     return False
+
+
+def has_verified_otp(phone_e164: str, db: Session) -> bool:
+    """Only the latest challenge can authorize registration."""
+    stmt = (
+        select(OtpRequest)
+        .where(OtpRequest.phone_e164 == phone_e164)
+        .order_by(OtpRequest.created_at.desc(), OtpRequest.id.desc())
+        .limit(1)
+    )
+    record = db.scalars(stmt).first()
+    return bool(
+        record
+        and record.is_verified
+        and _as_utc(record.expires_at) > datetime.now(timezone.utc)
+    )
 
 
 def get_user_by_phone(phone_e164: str, db: Session) -> User | None:
@@ -212,27 +296,29 @@ def register_user(
                 select(Agent).where(Agent.agent_code == referral_code_clean)
             ).first()
 
-            if referring_agent:
-                # Check if lead already exists for this phone
-                existing_ref = db.scalars(
-                    select(Referral).where(
-                        Referral.patient_phone_e164 == phone_e164
-                    )
-                ).first()
+            if not referring_agent:
+                raise ValueError("Referral code is invalid")
 
-                if existing_ref:
-                    existing_ref.patient_user_id = user.id
-                    existing_ref.status = "registered"
-                else:
-                    new_ref = Referral(
-                        patient_user_id=user.id,
-                        patient_name=full_name,
-                        patient_phone_e164=phone_e164,
-                        referring_agent_id=referring_agent.id,
-                        status="registered",
-                    )
-                    db.add(new_ref)
-                db.flush()
+            # An agent-created lead already owns attribution for this phone.
+            existing_ref = db.scalars(
+                select(Referral).where(Referral.patient_phone_e164 == phone_e164)
+            ).first()
+
+            if existing_ref:
+                if existing_ref.patient_user_id not in (None, user.id):
+                    raise ValueError("Referral attribution is already linked to another account")
+                existing_ref.patient_user_id = user.id
+                existing_ref.status = "registered"
+            else:
+                new_ref = Referral(
+                    patient_user_id=user.id,
+                    patient_name=full_name,
+                    patient_phone_e164=phone_e164,
+                    referring_agent_id=referring_agent.id,
+                    status="registered",
+                )
+                db.add(new_ref)
+            db.flush()
 
     db.commit()
     db.refresh(user)
@@ -263,7 +349,7 @@ def get_current_user(
         if not user_id:
             raise ValueError()
         user = db.get(User, uuid.UUID(user_id))
-        if not user:
+        if not user or not user.is_active:
             raise ValueError()
         return build_user_profile(user, db)
     except Exception:

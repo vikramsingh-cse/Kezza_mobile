@@ -1,56 +1,50 @@
-# Welcome to your Expo app 👋
+# Kezza mobile MVP
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Kezza is an Expo/React Native client backed by FastAPI. The first complete journey covers phone verification, referral attribution, treatment payment records, patient points, agent commission, and both account views.
 
-## Get started
+## Local Android and API setup
 
-1. Install dependencies
+The Android phone and Mac must be on the same Wi-Fi network. Android's `localhost` points back to the phone, not to the Mac.
+
+1. Find the Mac's current Wi-Fi address:
 
    ```bash
-   npm install
+   ipconfig getifaddr en0
    ```
 
-2. Start the app
+2. Set `EXPO_PUBLIC_API_URL` in the ignored root `.env` file to `http://<MAC_WIFI_IP>:8000/api/v1`. The current local `.env` uses `192.168.1.67`; update it if the Mac's address changes.
+
+3. Keep backend credentials in an ignored `.env` file. See [backend/.env.example](backend/.env.example) for variable names. Local OTP mode is enabled only with `APP_ENV=development`; production OTP requests return unavailable until an SMS/OTP provider is configured. Never commit `.env` files or paste secrets into source code.
+
+4. Start FastAPI from the `backend` directory, bound to all interfaces so the phone can reach it:
+
+   ```bash
+   cd backend
+   .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+
+5. In a second terminal, start Expo:
 
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+## Payment and ledger integrity
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- The mobile app can read points and commission ledgers but cannot write them.
+- A trusted POS/payment integration calls `POST /api/v1/payments/verify-collected` with `X-Payment-Verification-Key` only after confirming collection. Keep that key on the backend or trusted integration; never add it to `EXPO_PUBLIC_*` variables.
+- Refunds call `POST /api/v1/payments/{payment_id}/refund` through the same trusted integration. Original payments and ledger entries remain in history; refund events append points and commission reversal entries.
+- Amounts are calculated in integer cents. API amounts are validated to two decimal places.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Database migrations
 
-## Get a fresh project
-
-When you're ready, run:
+Keep the initial migration unchanged. For every schema change, generate a new Alembic revision, review the candidate migration manually, then apply it:
 
 ```bash
-npm run reset-project
+cd backend
+.venv/bin/alembic revision --autogenerate -m "describe schema change"
+# Review migrations/versions/<new_revision>.py before applying.
+.venv/bin/alembic upgrade head
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Autogeneration is a starting point and may miss data migrations, constraints, or backend-specific details.

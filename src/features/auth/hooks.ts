@@ -44,6 +44,7 @@ export function useVerifyOtp() {
             email: data.user.email ?? undefined,
           },
         });
+        useAuthStore.getState().setPendingReferralCode(null);
       }
     },
   });
@@ -72,6 +73,7 @@ export function useRegisterUser() {
           email: data.user.email ?? undefined,
         },
       });
+      useAuthStore.getState().setPendingReferralCode(null);
     },
   });
 }

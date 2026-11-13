@@ -19,9 +19,15 @@
 import axios from 'axios';
 import { useAuthStore } from '@/store/auth-store';
 
-// Set EXPO_PUBLIC_API_URL in your .env file, e.g.:
-//   EXPO_PUBLIC_API_URL=http://localhost:8000/api/v1
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1';
+// Android devices must use the Mac's LAN address, never the device's localhost.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
+if (!BASE_URL) {
+  throw new Error('Set EXPO_PUBLIC_API_URL in .env to the reachable Kezza API URL.');
+}
+const baseHost = BASE_URL.match(/^https?:\/\/([^/:?#]+)/i)?.[1];
+if (!baseHost || /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(baseHost)) {
+  throw new Error('EXPO_PUBLIC_API_URL must use a reachable host, such as the Mac Wi-Fi IP, not localhost.');
+}
 
 export const api = axios.create({
   baseURL: BASE_URL,

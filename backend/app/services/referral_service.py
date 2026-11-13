@@ -23,7 +23,9 @@ def get_agent_referral_summary(agent_id: uuid.UUID, db: Session) -> dict:
         )
     ) or 0
 
-    referral_link = f"kezzamobile://register?ref={agent.agent_code}"
+    # Expo Router maps this URL to the /(auth)/login screen. The referral code
+    # is carried through OTP verification and registration before attribution locks.
+    referral_link = f"kezzamobile://login?ref={agent.agent_code}"
 
     return {
         "agent_code": agent.agent_code,

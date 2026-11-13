@@ -1,15 +1,10 @@
 import os
-from pathlib import Path
 from typing import Generator
 
-from dotenv import load_dotenv
 from sqlalchemy import URL, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-# Load environment variables from backend/.env and root .env
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BACKEND_DIR / ".env")
-load_dotenv(BACKEND_DIR.parent / ".env")
+import app.config  # noqa: F401 - loads local environment files before reading variables
 
 database_url_str = os.getenv("DATABASE_URL")
 
@@ -27,11 +22,19 @@ if database_url_str:
         )
 else:
     # Build database URL from DB_* environment variables
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = int(os.getenv("DB_PORT", 5432))
-    db_name = os.getenv("DB_NAME", "kezza_db")
-    db_user = os.getenv("DB_USER", "kezza_user")
-    db_password = os.getenv("DB_PASSWORD", "kezza_pass123")
+    required = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD")
+    missing = [name for name in required if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(
+            "Set DATABASE_URL or configure all required database variables: "
+            + ", ".join(missing)
+        )
+
+    db_host = os.environ["DB_HOST"]
+    db_port = int(os.environ["DB_PORT"])
+    db_name = os.environ["DB_NAME"]
+    db_user = os.environ["DB_USER"]
+    db_password = os.environ["DB_PASSWORD"]
 
     database_url = URL.create(
         drivername="postgresql+psycopg",

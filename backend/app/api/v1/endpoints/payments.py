@@ -1,45 +1,59 @@
+import hmac
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status  # pyright: ignore[reportMissingImports]
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.config import PAYMENT_VERIFICATION_API_KEY
 from app.models.patient import Patient
 from app.models.payment import Payment
-from app.schemas.payments import PaymentResponseSchema, TreatmentPaymentCreateSchema
+from app.schemas.payments import (
+    PaymentRefundSchema,
+    PaymentResponseSchema,
+    TreatmentPaymentCreateSchema,
+)
 from app.services.auth_service import get_current_user
-from app.services.payment_service import process_treatment_payment
+from app.services.payment_service import process_treatment_payment, reverse_treatment_payment
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
 
-@router.post("/purchase-treatment", response_model=PaymentResponseSchema)
-def purchase_treatment_endpoint(
+def require_payment_source_key(
+    x_payment_verification_key: str | None = Header(default=None),
+) -> None:
+    if not PAYMENT_VERIFICATION_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment verification integration is not configured",
+        )
+    if len(PAYMENT_VERIFICATION_API_KEY) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment verification credential is too short",
+        )
+    if not x_payment_verification_key or not hmac.compare_digest(
+        x_payment_verification_key, PAYMENT_VERIFICATION_API_KEY
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A trusted payment verification credential is required",
+        )
+
+
+@router.post("/verify-collected", response_model=PaymentResponseSchema)
+def verify_collected_payment_endpoint(
     payload: TreatmentPaymentCreateSchema,
-    current_user: dict = Depends(get_current_user),
+    _: None = Depends(require_payment_source_key),
     db: Session = Depends(get_db),
 ):
     """
-    Step 4, 5, 6:
-    Records verified treatment payment.
-    - Credits patient points ledger (1 point per R10 spent).
-    - If patient was referred by an agent, marks referral converted and awards 10% commission!
+    Internal integration endpoint. Call only after a POS/payment provider confirms
+    collection. Mobile user tokens are deliberately not accepted here.
     """
-    # Determine target patient
-    target_patient_id = None
-    if payload.patient_id:
-        target_patient_id = uuid.UUID(payload.patient_id)
-    elif current_user.get("patient_id"):
-        target_patient_id = uuid.UUID(current_user["patient_id"])
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No patient profile found. Please register as a patient or specify patient_id.",
-        )
-
     try:
         result = process_treatment_payment(
-            patient_id=target_patient_id,
+            patient_id=payload.patient_id,
             treatment_name=payload.treatment_name,
             amount_rands=payload.amount_rands,
             payment_reference=payload.payment_reference,
@@ -47,6 +61,21 @@ def purchase_treatment_endpoint(
             db=db,
         )
         return PaymentResponseSchema(**result)
+    except ValueError as e:
+        code = status.HTTP_409_CONFLICT if "already" in str(e).lower() else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=str(e))
+
+
+@router.post("/{payment_id}/refund")
+def refund_collected_payment_endpoint(
+    payment_id: uuid.UUID,
+    payload: PaymentRefundSchema,
+    _: None = Depends(require_payment_source_key),
+    db: Session = Depends(get_db),
+):
+    """Append points and commission reversals for a trusted refund event."""
+    try:
+        return reverse_treatment_payment(payment_id, payload.reason, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

@@ -10,10 +10,12 @@ except ImportError:
 
 # Set testing database URL before importing app modules
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["APP_ENV"] = "test"
+os.environ["PAYMENT_VERIFICATION_API_KEY"] = "test-only-payment-key-for-automated-journey"
 
 from app.base import Base
 from app.database import get_db
-from app.main import app
+from app.main import app as fastapi_app
 import app.models  # noqa: F401 Ensure all models are registered
 
 # Create in-memory test engine
@@ -52,7 +54,7 @@ if pytest is not None:
         def override_get_db():
             yield db_session
 
-        app.dependency_overrides[get_db] = override_get_db
-        with TestClient(app) as c:
+        fastapi_app.dependency_overrides[get_db] = override_get_db
+        with TestClient(fastapi_app) as c:
             yield c
-        app.dependency_overrides.clear()
+        fastapi_app.dependency_overrides.clear()

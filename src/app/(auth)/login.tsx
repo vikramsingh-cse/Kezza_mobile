@@ -67,12 +67,13 @@ export default function LoginScreen() {
     }
 
     try {
-      await requestOtpMutation.mutateAsync({ phone_e164: data.phone });
+      const otpResult = await requestOtpMutation.mutateAsync({ phone_e164: data.phone });
       router.push({
         pathname: '/(auth)/verify-otp',
         params: {
           phone: data.phone,
           ref: data.referralCode ?? '',
+          devCode: otpResult.dev_code ?? '',
         },
       });
     } catch (err: any) {
