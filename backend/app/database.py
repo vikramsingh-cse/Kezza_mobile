@@ -1,9 +1,11 @@
 
 import os
 from pathlib import Path
+from typing import Generator
 
 from dotenv import load_dotenv
 from sqlalchemy import URL, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 # Load environment variables from backend/.env
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -43,3 +45,27 @@ engine = create_engine(
     connect_args={"connect_timeout": 5},
 )
 
+# Session factory — use as a FastAPI dependency via get_db()
+SessionLocal = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
+
+
+def get_db() -> Generator[Session, None, None]:
+    """
+    FastAPI dependency that yields a database session and
+    guarantees the session is closed after each request.
+
+    Usage:
+        @router.get("/example")
+        def example(db: Session = Depends(get_db)):
+            ...
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

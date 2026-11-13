@@ -7,6 +7,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import engine
 
+# Import models so they are registered with the ORM mapper
+import app.models  # noqa: F401
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -54,5 +57,3 @@ def database_health():
             status_code=503,
             detail="Database connection unavailable",
         )
-
-
