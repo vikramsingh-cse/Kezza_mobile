@@ -1,6 +1,5 @@
 import { router } from 'expo-router';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,27 +9,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Spacing } from '@/constants/theme';
-import { useCurrentUser } from '@/features/auth/hooks';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
 
 export default function ProfileScreen() {
   const theme = useTheme();
-  const { user, signOut, updateUser } = useAuthStore();
-  const currentUserQuery = useCurrentUser();
+  const { user, signOut } = useAuthStore();
 
   async function handleSignOut() {
     await signOut();
-    router.replace('/(auth)/login');
-  }
-
-  function handleToggleDemoRole() {
-    const nextRole = user?.role === 'agent' ? 'patient' : 'agent';
-    updateUser({ role: nextRole });
-    Alert.alert(
-      'Role Switched',
-      `Switched view to ${nextRole.toUpperCase()} mode. Return to tabs to test the experience!`,
-    );
+    router.replace('/(auth)');
   }
 
   return (
@@ -79,25 +67,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Testing / Role Toggle Shortcut */}
-        <View style={[styles.demoCard, { backgroundColor: theme.backgroundElement }]}>
-          <Text style={[styles.demoTitle, { color: theme.text }]}>
-            🛠️ MVP Journey Demo Helper
-          </Text>
-          <Text style={[styles.demoDesc, { color: theme.textSecondary }]}>
-            Easily toggle between Agent and Patient modes to experience both sides of referral generation and points/commissions.
-          </Text>
-
-          <Pressable
-            style={styles.toggleBtn}
-            onPress={handleToggleDemoRole}
-          >
-            <Text style={styles.toggleBtnText}>
-              Switch to {user?.role === 'agent' ? '🏥 Patient View' : '🏷️ Agent View'}
-            </Text>
-          </Pressable>
-        </View>
-
         <View style={{ flex: 1 }} />
 
         {/* Sign Out */}
@@ -139,17 +108,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   rolePillText: { color: '#2563EB', fontSize: 12, fontWeight: '700' },
-
-  demoCard: { borderRadius: 16, padding: Spacing.three, gap: Spacing.two },
-  demoTitle: { fontSize: 15, fontWeight: '700' },
-  demoDesc: { fontSize: 12, lineHeight: 18 },
-  toggleBtn: {
-    backgroundColor: '#2563EB',
-    padding: Spacing.two,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  toggleBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
   signOutBtn: {
     height: 50,

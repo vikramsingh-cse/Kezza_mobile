@@ -2,20 +2,24 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+INDIAN_MOBILE_PATTERN = r"^\+91[6-9]\d{9}$"
+
 
 class OtpRequestSchema(BaseModel):
     phone_e164: str = Field(
-        ..., pattern=r"^\+[1-9]\d{7,14}$", description="E.164 phone number, e.g. +27821234567"
+        ...,
+        pattern=INDIAN_MOBILE_PATTERN,
+        description="Indian mobile number in E.164 format, e.g. +919876543210",
     )
 
 
 class OtpVerifySchema(BaseModel):
-    phone_e164: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    phone_e164: str = Field(..., pattern=INDIAN_MOBILE_PATTERN)
     otp_code: str = Field(..., pattern=r"^\d{6}$", description="6-digit verification code")
 
 
 class UserRegisterSchema(BaseModel):
-    phone_e164: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    phone_e164: str = Field(..., pattern=INDIAN_MOBILE_PATTERN)
     full_name: str = Field(..., min_length=1, max_length=150)
     role: Literal["patient", "agent"] = "patient"
     email: str | None = None

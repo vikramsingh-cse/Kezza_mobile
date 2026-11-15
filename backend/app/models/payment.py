@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,8 +42,8 @@ class Payment(Base):
         nullable=False,
     )
 
-    # Stored in cents (e.g. 150000 = R 1500.00)
-    amount_cents: Mapped[int] = mapped_column(
+    # Integer minor units: paise for INR, cents for historical ZAR payments.
+    amount_minor_units: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
     )
@@ -50,7 +51,8 @@ class Payment(Base):
     currency: Mapped[str] = mapped_column(
         String(10),
         nullable=False,
-        default="ZAR",
+        default="INR",
+        server_default=text("'INR'"),
     )
 
     # 'pending', 'verified', 'refunded'
@@ -68,6 +70,16 @@ class Payment(Base):
 
     verified_at: Mapped[DateTime | None] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+
+    refunded_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    refund_reason: Mapped[str | None] = mapped_column(
+        String(255),
         nullable=True,
     )
 

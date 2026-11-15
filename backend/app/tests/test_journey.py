@@ -10,16 +10,17 @@ Tests the complete 7-step business flow from agent referral to reward & commissi
 7. Both see their results (Patient sees credit; Agent sees commission & conversion)
 """
 
-from decimal import Decimal
-
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.models.user import User
 
 
-def test_complete_kezza_journey(client: TestClient):
+def test_complete_kezza_journey(client: TestClient, db_session: Session):
     # =========================================================================
     # Step 1: Agent registers and gets unique referral code & link
     # =========================================================================
-    agent_phone = "+27821110001"
+    agent_phone = "+919821110001"
     client.post("/api/v1/auth/otp/request", json={"phone_e164": agent_phone})
     agent_otp_res = client.post(
         "/api/v1/auth/otp/verify",
@@ -53,7 +54,7 @@ def test_complete_kezza_journey(client: TestClient):
     # =========================================================================
     # Step 2: Patient registers using agent's referral link
     # =========================================================================
-    patient_phone = "+27822220002"
+    patient_phone = "+919822220002"
     client.post("/api/v1/auth/otp/request", json={"phone_e164": patient_phone})
     patient_otp_res = client.post(
         "/api/v1/auth/otp/verify",
@@ -96,29 +97,32 @@ def test_complete_kezza_journey(client: TestClient):
     assert agent_refs[0]["status"] == "registered"
 
     # =========================================================================
-    # Step 4, 5, 6: Patient purchases a treatment for R 1,500
+    # Step 4, 5, 6: Patient purchases treatment for ₹50,000.
     # =========================================================================
+    payment_payload = {
+        "patient_id": patient_id,
+        "treatment_name": "Premium Teeth Whitening",
+        "amount_rupees": "50000.00",
+        "payment_reference": "INV-2026-001",
+    }
     treatment_res = client.post(
         "/api/v1/payments/verify-collected",
         headers={"X-Payment-Verification-Key": "test-only-payment-key-for-automated-journey"},
-        json={
-            "patient_id": patient_id,
-            "treatment_name": "Premium Teeth Whitening",
-            "amount_rands": 1500.00,
-            "payment_reference": "INV-2026-001",
-        },
+        json=payment_payload,
     )
     assert treatment_res.status_code == 200, treatment_res.text
     treatment_data = treatment_res.json()
 
-    # Step 5: Verify Patient received points (10% back = 150 points)
-    assert treatment_data["points_earned"] == 150
-    assert treatment_data["new_points_balance"] == 150
+    assert treatment_data["amount_minor_units"] == 5_000_000
+    assert treatment_data["currency"] == "INR"
 
-    # Step 6: Verify Agent received commission (10% of R1,500 = R150)
+    # Step 5: ₹1 eligible spend = 1 point.
+    assert treatment_data["points_earned"] == 50_000
+    assert treatment_data["new_points_balance"] == 50_000
+
+    # Step 6: The base tier is 1% (₹500 on this payment).
     assert treatment_data["referral_converted"] is True
-    # Pydantic serializes Decimal values as JSON strings to preserve precision.
-    assert Decimal(treatment_data["agent_commission_rands"]) == Decimal("150.00")
+    assert treatment_data["agent_commission_minor_units"] == 50_000
 
     # =========================================================================
     # Step 7: Both see their results!
@@ -127,20 +131,65 @@ def test_complete_kezza_journey(client: TestClient):
     patient_wallet_res = client.get("/api/v1/wallet/patient", headers=patient_auth_headers)
     assert patient_wallet_res.status_code == 200
     wallet_data = patient_wallet_res.json()
-    assert wallet_data["total_points"] == 150
-    assert wallet_data["credit_rands"] == 150.00
+    assert wallet_data["total_points"] == 50_000
+    assert wallet_data["credit_minor_units"] == 200_000
+    assert wallet_data["currency"] == "INR"
     assert len(wallet_data["ledger"]) == 1
+    assert wallet_data["ledger"][0]["policy_version"] == "inr_v1"
     assert "Premium Teeth Whitening" in wallet_data["ledger"][0]["description"]
 
-    # 7b. Agent sees earnings and updated referral details
+    # Payment creates a pending commission for the administrator to review.
     agent_earnings_res = client.get("/api/v1/wallet/agent", headers=agent_auth_headers)
     assert agent_earnings_res.status_code == 200
     earnings_data = agent_earnings_res.json()
-    assert earnings_data["approved_rands"] == 150.00
-    assert earnings_data["total_earned_rands"] == 150.00
+    assert earnings_data["pending_minor_units"] == 50_000
+    assert earnings_data["approved_minor_units"] == 0
+    assert earnings_data["total_earned_minor_units"] == 0
+    assert earnings_data["commission_tier"] == "Base (1%)"
+    assert earnings_data["eligible_direct_agents"] == 0
     assert len(earnings_data["ledger"]) == 1
-    assert earnings_data["ledger"][0]["amount_rands"] == 150.00
+    assert earnings_data["ledger"][0]["amount_minor_units"] == 50_000
+    assert earnings_data["ledger"][0]["currency"] == "INR"
+    assert earnings_data["ledger"][0]["tier_name"] == "Base (1%)"
+    assert earnings_data["ledger"][0]["eligible_direct_agents"] == 0
     assert earnings_data["ledger"][0]["treatment_name"] == "Premium Teeth Whitening"
+
+    # An OTP-authenticated, provisioned admin approves the commission.
+    admin_phone = "+919823330003"
+    admin_user = User(
+        phone_e164=admin_phone,
+        full_name="Kezza Administrator",
+        role="admin",
+    )
+    db_session.add(admin_user)
+    db_session.commit()
+    client.post("/api/v1/auth/otp/request", json={"phone_e164": admin_phone})
+    admin_login = client.post(
+        "/api/v1/auth/otp/verify",
+        json={"phone_e164": admin_phone, "otp_code": "123456"},
+    )
+    assert admin_login.status_code == 200
+    assert admin_login.json()["user"]["role"] == "admin"
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+    pending_res = client.get("/api/v1/admin/commissions/pending", headers=admin_headers)
+    assert pending_res.status_code == 200
+    assert len(pending_res.json()) == 1
+    assert pending_res.json()[0]["agent_code"] == agent_code
+    approval_res = client.post(
+        f"/api/v1/admin/commissions/{pending_res.json()[0]['commission_id']}/approve",
+        headers=admin_headers,
+    )
+    assert approval_res.status_code == 200, approval_res.text
+    assert approval_res.json()["status"] == "approved"
+    assert approval_res.json()["approved_by_user_id"] == str(admin_user.id)
+
+    # 7b. Agent sees approved earnings and updated referral details
+    agent_earnings_res = client.get("/api/v1/wallet/agent", headers=agent_auth_headers)
+    earnings_data = agent_earnings_res.json()
+    assert earnings_data["pending_minor_units"] == 0
+    assert earnings_data["approved_minor_units"] == 50_000
+    assert earnings_data["total_earned_minor_units"] == 50_000
 
     # 7c. Agent sees referral status converted
     updated_refs_res = client.get("/api/v1/referrals", headers=agent_auth_headers)
@@ -155,3 +204,45 @@ def test_complete_kezza_journey(client: TestClient):
     summary = updated_summary_res.json()
     assert summary["total_referrals"] == 1
     assert summary["converted_count"] == 1
+
+    # A repeated collection reference is rejected without duplicating rewards.
+    duplicate_res = client.post(
+        "/api/v1/payments/verify-collected",
+        headers={"X-Payment-Verification-Key": "test-only-payment-key-for-automated-journey"},
+        json=payment_payload,
+    )
+    assert duplicate_res.status_code == 409
+
+    # Refunds keep the original rows and append linked point/commission reversals.
+    refund_res = client.post(
+        f"/api/v1/payments/{treatment_data['payment_id']}/refund",
+        headers={"X-Payment-Verification-Key": "test-only-payment-key-for-automated-journey"},
+        json={"reason": "Patient cancelled the treatment"},
+    )
+    assert refund_res.status_code == 200, refund_res.text
+    assert refund_res.json()["reversed_points"] == 50_000
+    assert refund_res.json()["reversed_commission_minor_units"] == 50_000
+
+    refunded_wallet = client.get(
+        "/api/v1/wallet/patient",
+        headers=patient_auth_headers,
+    ).json()
+    assert refunded_wallet["total_points"] == 0
+    assert refunded_wallet["credit_minor_units"] == 0
+    assert [entry["event_type"] for entry in refunded_wallet["ledger"]] == [
+        "refund_reversal",
+        "treatment_reward",
+    ]
+    assert refunded_wallet["ledger"][0]["reversal_of_id"] == refunded_wallet["ledger"][1]["id"]
+
+    refunded_earnings = client.get(
+        "/api/v1/wallet/agent",
+        headers=agent_auth_headers,
+    ).json()
+    assert refunded_earnings["approved_minor_units"] == 0
+    assert refunded_earnings["total_earned_minor_units"] == 0
+    assert len(refunded_earnings["ledger"]) == 2
+    reversal = next(entry for entry in refunded_earnings["ledger"] if entry["status"] == "reversed")
+    original = next(entry for entry in refunded_earnings["ledger"] if entry["status"] == "approved")
+    assert reversal["amount_minor_units"] == -50_000
+    assert reversal["reversal_of_id"] == original["id"]

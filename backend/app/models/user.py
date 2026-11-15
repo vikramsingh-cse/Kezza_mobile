@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, DateTime, String, Uuid, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.base import Base
@@ -31,6 +31,13 @@ class User(Base):
         nullable=True,
     )
 
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="patient",
+        server_default=text("'patient'"),
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -41,4 +48,11 @@ class User(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('patient', 'agent', 'admin')",
+            name="ck_users_role",
+        ),
     )

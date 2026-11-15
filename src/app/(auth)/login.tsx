@@ -1,12 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -18,67 +19,55 @@ import { z } from 'zod';
 import { Spacing } from '@/constants/theme';
 import { useRequestOtp } from '@/features/auth/hooks';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuthStore } from '@/store/auth-store';
+import { getIndianMobileDigits, isValidIndianMobile, toIndianE164 } from '@/lib/indian-phone';
+import { getApiErrorMessage } from '@/lib/api-error';
 
 const schema = z.object({
   phone: z
     .string()
-    .min(8, 'Phone number is required')
-    .regex(
-      /^\+[1-9]\d{7,14}$/,
-      'Enter phone with country code (e.g. +27821234567)',
-    ),
-  referralCode: z.string().optional(),
+    .refine(isValidIndianMobile, 'Enter a valid 10-digit Indian mobile number.'),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 export default function LoginScreen() {
   const theme = useTheme();
-  const params = useLocalSearchParams<{ ref?: string }>();
-  const setPendingReferralCode = useAuthStore((s) => s.setPendingReferralCode);
+  const params = useLocalSearchParams<{ ref?: string; admin?: string; role?: string }>();
+  const isAdminLogin = params.admin === '1';
+  const accountRole = params.role === 'agent' ? 'agent' : 'patient';
+  const isPatientLogin = accountRole === 'patient';
   const requestOtpMutation = useRequestOtp();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const {
     control,
     handleSubmit,
-    setValue,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      phone: '+2782',
-      referralCode: params.ref ?? '',
+      phone: '',
     },
   });
 
-  useEffect(() => {
-    if (params.ref) {
-      setValue('referralCode', params.ref);
-      setPendingReferralCode(params.ref);
-    }
-  }, [params.ref, setValue, setPendingReferralCode]);
-
   async function onSubmit(data: FormValues) {
     setErrorMessage(null);
-    if (data.referralCode) {
-      setPendingReferralCode(data.referralCode.trim().toUpperCase());
-    }
 
     try {
-      const otpResult = await requestOtpMutation.mutateAsync({ phone_e164: data.phone });
+      const phoneE164 = toIndianE164(data.phone);
+      const otpResult = await requestOtpMutation.mutateAsync({ phone_e164: phoneE164 });
       router.push({
         pathname: '/(auth)/verify-otp',
         params: {
-          phone: data.phone,
-          ref: data.referralCode ?? '',
+          phone: phoneE164,
+          ref: isAdminLogin ? '' : params.ref ?? '',
           devCode: otpResult.dev_code ?? '',
+          adminOnly: isAdminLogin ? '1' : '0',
+          role: isAdminLogin ? '' : accountRole,
         },
       });
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || 'Failed to send verification code. Please try again.';
-      setErrorMessage(msg);
+    } catch (err: unknown) {
+      setErrorMessage(getApiErrorMessage(err, 'Failed to send verification code. Please try again.'));
     }
   }
 
@@ -88,7 +77,7 @@ export default function LoginScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.container}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.brandRow}>
@@ -98,10 +87,18 @@ export default function LoginScreen() {
               <Text style={[styles.brandTitle, { color: theme.text }]}>Kezza</Text>
             </View>
             <Text style={[styles.title, { color: theme.text }]}>
-              Welcome to Kezza
+              {isAdminLogin
+                ? 'Administrator sign in'
+                : isPatientLogin
+                  ? 'Patient sign in'
+                  : 'Agent / Partner sign in'}
             </Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-              Patient rewards & referral earnings made simple. Enter your mobile number to get started.
+              {isAdminLogin
+                ? 'Sign in with the phone number provisioned for your Kezza admin account.'
+                : isPatientLogin
+                  ? 'Access your treatment rewards and referral credits with your mobile number.'
+                  : 'Manage your referrals, partner network and commission earnings with your mobile number.'}
             </Text>
           </View>
 
@@ -109,75 +106,44 @@ export default function LoginScreen() {
           <View style={styles.form}>
             {/* Phone Input */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.text }]}>
-                Mobile Number (E.164)
-              </Text>
+              <Text style={[styles.label, { color: theme.text }]}>Mobile number</Text>
               <Controller
                 control={control}
                 name="phone"
                 render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
+                  <View
                     style={[
-                      styles.input,
+                      styles.phoneInputWrap,
                       {
                         borderColor: errors.phone ? '#E53E3E' : theme.backgroundElement,
                         backgroundColor: theme.backgroundElement,
-                        color: theme.text,
                       },
                     ]}
-                    placeholder="+27 82 123 4567"
-                    placeholderTextColor={theme.textSecondary}
-                    keyboardType="phone-pad"
-                    autoComplete="tel"
-                    textContentType="telephoneNumber"
-                    onBlur={onBlur}
-                    onChangeText={onChange}
-                    value={value}
-                  />
+                  >
+                    <View style={styles.countryPrefix}>
+                      <Text style={styles.countryFlag}>🇮🇳</Text>
+                      <Text style={[styles.countryCode, { color: theme.text }]}>+91</Text>
+                    </View>
+                    <View style={styles.phoneDivider} />
+                    <TextInput
+                      accessibilityLabel="10-digit Indian mobile number"
+                      style={[styles.phoneInput, { color: theme.text }]}
+                      placeholder="9876543210"
+                      placeholderTextColor={theme.textSecondary}
+                      keyboardType="phone-pad"
+                      autoComplete="tel"
+                      textContentType="telephoneNumber"
+                      onBlur={onBlur}
+                      onChangeText={(input) => onChange(getIndianMobileDigits(input))}
+                      value={value}
+                    />
+                  </View>
                 )}
               />
               {errors.phone && (
                 <Text style={styles.errorText}>{errors.phone.message}</Text>
               )}
-            </View>
-
-            {/* Referral Code (Optional / Deep-linked) */}
-            <View style={styles.fieldGroup}>
-              <View style={styles.labelRow}>
-                <Text style={[styles.label, { color: theme.text }]}>
-                  Referral Code
-                </Text>
-                <Text style={[styles.optionalTag, { color: theme.textSecondary }]}>
-                  Optional
-                </Text>
-              </View>
-              <Controller
-                control={control}
-                name="referralCode"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[
-                      styles.input,
-                      {
-                        borderColor: theme.backgroundElement,
-                        backgroundColor: theme.backgroundElement,
-                        color: theme.text,
-                      },
-                    ]}
-                    placeholder="e.g. AGT-B492E1"
-                    placeholderTextColor={theme.textSecondary}
-                    autoCapitalize="characters"
-                    onBlur={onBlur}
-                    onChangeText={onChange}
-                    value={value}
-                  />
-                )}
-              />
-              {params.ref && (
-                <Text style={styles.refDetectedText}>
-                  ✓ Referred by Agent ({params.ref})
-                </Text>
-              )}
+              <Text style={[styles.phoneHint, { color: theme.textSecondary }]}>Enter 10 digits. We’ll add +91 automatically.</Text>
             </View>
 
             {errorMessage && (
@@ -198,15 +164,40 @@ export default function LoginScreen() {
               {requestOtpMutation.isPending ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Send Verification Code</Text>
+                <Text style={styles.buttonText}>
+                  {isAdminLogin ? 'Send Admin Verification Code' : 'Continue with mobile number'}
+                </Text>
               )}
             </Pressable>
 
             <Text style={[styles.demoNote, { color: theme.textSecondary }]}>
-              💡 Development mode: Use code <Text style={{ fontWeight: '700' }}>123456</Text> to verify instantly.
+              We’ll send a one-time verification code to your mobile number.
             </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                router.replace(
+                  isAdminLogin
+                    ? '/(auth)'
+                    : { pathname: '/(auth)/login', params: { admin: '1' } },
+                )
+              }
+            >
+              <Text style={styles.adminLink}>
+                {isAdminLogin ? 'Patient or partner sign in' : 'Administrator sign in'}
+              </Text>
+            </Pressable>
+            {!isAdminLogin ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.replace({ pathname: '/(auth)', params: { ref: params.ref ?? '' } })}
+              >
+                <Text style={styles.switchAccountLink}>Choose a different account type</Text>
+              </Pressable>
+            ) : null}
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -216,7 +207,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
   container: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: Spacing.four,
     justifyContent: 'center',
     gap: Spacing.four,
@@ -237,9 +228,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 15, lineHeight: 22 },
   form: { gap: Spacing.three },
   fieldGroup: { gap: Spacing.one },
-  labelRow: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 14, fontWeight: '600' },
-  optionalTag: { fontSize: 12 },
   input: {
     height: 52,
     borderWidth: 1.5,
@@ -247,7 +236,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     fontSize: 16,
   },
-  refDetectedText: { fontSize: 13, color: '#38A169', fontWeight: '600' },
+  phoneInputWrap: {
+    height: 52,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  countryPrefix: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 12 },
+  countryFlag: { fontSize: 17 },
+  countryCode: { fontSize: 16, fontWeight: '700' },
+  phoneDivider: { width: 1, height: 24, backgroundColor: '#94A3B8' },
+  phoneInput: { flex: 1, height: '100%', paddingHorizontal: 12, fontSize: 16 },
+  phoneHint: { fontSize: 12 },
   errorText: { fontSize: 13, color: '#E53E3E' },
   errorBanner: {
     backgroundColor: '#FFF5F5',
@@ -268,4 +270,6 @@ const styles = StyleSheet.create({
   buttonPressed: { opacity: 0.8 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   demoNote: { textAlign: 'center', fontSize: 13, marginTop: Spacing.two },
+  adminLink: { color: '#3C9FFE', fontSize: 14, fontWeight: '700', textAlign: 'center' },
+  switchAccountLink: { color: '#64748B', fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

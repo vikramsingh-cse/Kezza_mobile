@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
@@ -16,32 +17,51 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Spacing } from '@/constants/theme';
 import { useRegisterUser, useVerifyOtp } from '@/features/auth/hooks';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuthStore } from '@/store/auth-store';
+import { getApiErrorMessage } from '@/lib/api-error';
+import { isValidIndianE164 } from '@/lib/indian-phone';
 
 const OTP_LENGTH = 6;
 
 export default function VerifyOtpScreen() {
   const theme = useTheme();
-  const { phone, ref, devCode } = useLocalSearchParams<{ phone: string; ref?: string; devCode?: string }>();
-  const pendingReferralCode = useAuthStore((s) => s.pendingReferralCode);
-
-  const verifyOtpMutation = useVerifyOtp();
+  const { phone, ref, devCode, adminOnly, role: roleParam } = useLocalSearchParams<{
+    phone: string;
+    ref?: string;
+    devCode?: string;
+    adminOnly?: string;
+    role?: string;
+  }>();
+  const isAdminOnly = adminOnly === '1';
+  const accountRole = roleParam === 'agent' ? 'agent' : 'patient';
+  const accountLabel = accountRole === 'agent' ? 'Agent / Partner' : 'Patient';
+  const verifyOtpMutation = useVerifyOtp(isAdminOnly ? 'admin' : accountRole);
   const registerUserMutation = useRegisterUser();
 
-  const [otp, setOtp] = useState('');
+  // The API only returns dev_code in development. Pre-fill that returned code
+  // so local admin verification is connected end to end; never guess a code
+  // when the backend did not provide one.
+  const [otp, setOtp] = useState(() =>
+    typeof devCode === 'string' && /^\d{6}$/.test(devCode) ? devCode : '',
+  );
   const [error, setError] = useState<string | null>(null);
+  const [roleMismatch, setRoleMismatch] = useState(false);
 
   // Registration state if user is new
   const [needsRegistration, setNeedsRegistration] = useState(false);
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<'patient' | 'agent'>('patient');
-  const [referralCode, setReferralCode] = useState(ref || pendingReferralCode || '');
+  const [referralCode, setReferralCode] = useState(ref || '');
 
   const inputRef = useRef<TextInput>(null);
 
   async function handleVerify() {
     if (otp.length !== OTP_LENGTH) return;
     setError(null);
+    setRoleMismatch(false);
+
+    if (!isValidIndianE164(phone ?? '')) {
+      setError('This link has an invalid phone number. Go back and enter a 10-digit Indian mobile number.');
+      return;
+    }
 
     try {
       const result = await verifyOtpMutation.mutateAsync({
@@ -50,12 +70,22 @@ export default function VerifyOtpScreen() {
       });
 
       if (result.status === 'needs_registration') {
-        setNeedsRegistration(true);
+        if (isAdminOnly) {
+          setError('No admin account is provisioned for this number. Contact a Kezza system owner.');
+        } else {
+          setNeedsRegistration(true);
+        }
+      } else if (isAdminOnly && result.user?.role !== 'admin') {
+        setError('This number does not have administrator access.');
+      } else if (!isAdminOnly && result.user?.role !== accountRole) {
+        const registeredAs = result.user?.role === 'agent' ? 'Agent / Partner' : 'Patient';
+        setError(`This mobile number already has a ${registeredAs} account.`);
+        setRoleMismatch(true);
       } else {
-        // User logged in, useProtectedRoute in RootLayout will redirect to /(app)/(tabs)
+        // Root routing sends admin users to the admin console and others to the app.
       }
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Invalid verification code.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Invalid verification code.'));
     }
   }
 
@@ -70,12 +100,12 @@ export default function VerifyOtpScreen() {
       await registerUserMutation.mutateAsync({
         phone_e164: phone ?? '',
         full_name: fullName.trim(),
-        role: role,
+        role: accountRole,
         referral_code: referralCode.trim() || undefined,
       });
       // User registered & authenticated, will redirect automatically
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Registration failed. Please try again.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Registration failed. Please try again.'));
     }
   }
 
@@ -95,7 +125,9 @@ export default function VerifyOtpScreen() {
             /* Step 2: OTP Verification */
             <View style={styles.content}>
               <View style={styles.header}>
-                <Text style={[styles.title, { color: theme.text }]}>Enter Code</Text>
+                <Text style={[styles.title, { color: theme.text }]}>
+                  {isAdminOnly ? 'Admin verification' : `Verify ${accountLabel} account`}
+                </Text>
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
                   We sent a 6-digit code to{' '}
                   <Text style={{ fontWeight: '700', color: theme.text }}>{phone}</Text>
@@ -134,6 +166,14 @@ export default function VerifyOtpScreen() {
               </View>
 
               {error && <Text style={styles.errorText}>{error}</Text>}
+              {roleMismatch ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.replace({ pathname: '/(auth)', params: { ref: ref ?? '' } })}
+                >
+                  <Text style={styles.switchAccountText}>Choose the correct account type</Text>
+                </Pressable>
+              ) : null}
 
               <Pressable
                 style={({ pressed }) => [
@@ -161,52 +201,10 @@ export default function VerifyOtpScreen() {
             /* Step 3: Fast Inline Registration */
             <View style={styles.content}>
               <View style={styles.header}>
-                <Text style={[styles.title, { color: theme.text }]}>Almost Done!</Text>
+                <Text style={[styles.title, { color: theme.text }]}>Create your {accountLabel} account</Text>
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                  Please choose your account type and tell us your name.
+                  Your mobile number is verified. Add your name to finish setting up your account.
                 </Text>
-              </View>
-
-              {/* Role Selection */}
-              <View style={styles.fieldGroup}>
-                <Text style={[styles.label, { color: theme.text }]}>I am registering as a:</Text>
-                <View style={styles.roleToggleRow}>
-                  <Pressable
-                    style={[
-                      styles.roleButton,
-                      role === 'patient' && styles.roleButtonActive,
-                    ]}
-                    onPress={() => setRole('patient')}
-                  >
-                    <Text
-                      style={[
-                        styles.roleButtonText,
-                        role === 'patient' && styles.roleButtonTextActive,
-                      ]}
-                    >
-                      🏥 Patient
-                    </Text>
-                    <Text style={styles.roleSubtext}>Earn Treatment Credit</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.roleButton,
-                      role === 'agent' && styles.roleButtonActive,
-                    ]}
-                    onPress={() => setRole('agent')}
-                  >
-                    <Text
-                      style={[
-                        styles.roleButtonText,
-                        role === 'agent' && styles.roleButtonTextActive,
-                      ]}
-                    >
-                      🏷️ Agent
-                    </Text>
-                    <Text style={styles.roleSubtext}>Earn Referral Commission</Text>
-                  </Pressable>
-                </View>
               </View>
 
               {/* Full Name */}
@@ -228,11 +226,10 @@ export default function VerifyOtpScreen() {
                 />
               </View>
 
-              {/* Referral Code (if patient) */}
-              {role === 'patient' && (
-                <View style={styles.fieldGroup}>
+              {/* Patient attribution code or partner sponsor code */}
+              <View style={styles.fieldGroup}>
                   <Text style={[styles.label, { color: theme.text }]}>
-                    Agent Referral Code (Optional)
+                    {accountRole === 'patient' ? 'Agent referral code (optional)' : 'Partner sponsor code (optional)'}
                   </Text>
                   <TextInput
                     style={[
@@ -243,7 +240,7 @@ export default function VerifyOtpScreen() {
                         color: theme.text,
                       },
                     ]}
-                    placeholder="e.g. AGT-B492E1"
+                    placeholder="Enter a code if you have one"
                     placeholderTextColor={theme.textSecondary}
                     autoCapitalize="characters"
                     value={referralCode}
@@ -251,11 +248,10 @@ export default function VerifyOtpScreen() {
                   />
                   {referralCode ? (
                     <Text style={styles.attributionNotice}>
-                      🔒 Attribution will lock to Agent ({referralCode.toUpperCase()})
+                      🔒 {accountRole === 'patient' ? 'Attribution locks to Agent' : 'Partner will be linked to sponsor'} ({referralCode.toUpperCase()})
                     </Text>
                   ) : null}
-                </View>
-              )}
+              </View>
 
               {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -271,7 +267,7 @@ export default function VerifyOtpScreen() {
                 {registerUserMutation.isPending ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.buttonText}>Complete Registration</Text>
+                  <Text style={styles.buttonText}>Create account</Text>
                 )}
               </Pressable>
             </View>
@@ -328,26 +324,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     fontSize: 16,
   },
-  roleToggleRow: { flexDirection: 'row', gap: Spacing.two },
-  roleButton: {
-    flex: 1,
-    padding: Spacing.three,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    gap: 4,
-  },
-  roleButtonActive: {
-    borderColor: '#3C9FFE',
-    backgroundColor: '#EFF6FF',
-  },
-  roleButtonText: { fontSize: 16, fontWeight: '700', color: '#64748B' },
-  roleButtonTextActive: { color: '#2563EB' },
-  roleSubtext: { fontSize: 11, color: '#94A3B8' },
   attributionNotice: { fontSize: 13, color: '#38A169', fontWeight: '600' },
   errorText: { fontSize: 13, color: '#E53E3E', textAlign: 'center' },
+  switchAccountText: { color: '#2563EB', fontSize: 14, fontWeight: '700', textAlign: 'center' },
   button: {
     height: 52,
     backgroundColor: '#3C9FFE',

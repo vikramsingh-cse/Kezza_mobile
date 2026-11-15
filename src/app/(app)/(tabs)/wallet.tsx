@@ -5,6 +5,7 @@ import { Spacing } from '@/constants/theme';
 import { useAgentEarnings } from '@/features/commissions/hooks';
 import { usePatientWallet } from '@/features/points/hooks';
 import { useTheme } from '@/hooks/use-theme';
+import { formatMoney } from '@/lib/money';
 import { useAuthStore } from '@/store/auth-store';
 
 function formatDate(value: string) {
@@ -35,13 +36,18 @@ export default function WalletTab() {
           <>
             <View style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Total earned</Text>
-              <Text style={styles.balanceValue}>{earnings.data ? `R ${earnings.data.total_earned_rands.toFixed(2)}` : '—'}</Text>
+              <Text style={styles.balanceValue}>{earnings.data ? formatMoney(earnings.data.total_earned_minor_units, 'INR') : '—'}</Text>
               <Text style={styles.balanceHint}>{earnings.data?.commission_tier ?? 'Commission tier'}</Text>
             </View>
             <View style={styles.metricsRow}>
-              <Metric label="Approved" value={earnings.data ? `R ${earnings.data.approved_rands.toFixed(2)}` : '—'} />
-              <Metric label="Paid" value={earnings.data ? `R ${earnings.data.paid_rands.toFixed(2)}` : '—'} />
+              <Metric label="Approved" value={earnings.data ? formatMoney(earnings.data.approved_minor_units, 'INR') : '—'} />
+              <Metric label="Paid" value={earnings.data ? formatMoney(earnings.data.paid_minor_units, 'INR') : '—'} />
             </View>
+            {earnings.data?.earnings_by_currency.ZAR?.total_earned_minor_units ? (
+              <Text style={[styles.rate, { color: theme.textSecondary }]}>
+                Legacy ZAR earnings: {formatMoney(earnings.data.earnings_by_currency.ZAR.total_earned_minor_units, 'ZAR')}
+              </Text>
+            ) : null}
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Commission history</Text>
             {earnings.isLoading ? <ActivityIndicator color="#3C9FFE" /> : null}
             {earnings.isError ? <Text style={[styles.empty, { color: theme.textSecondary }]}>Could not load earnings. Pull down to retry.</Text> : null}
@@ -50,9 +56,11 @@ export default function WalletTab() {
               <View key={entry.id} style={[styles.ledgerRow, { backgroundColor: theme.backgroundElement }]}>
                 <View style={styles.ledgerCopy}>
                   <Text style={[styles.ledgerTitle, { color: theme.text }]}>{entry.treatment_name ?? 'Treatment commission'}</Text>
-                  <Text style={[styles.ledgerMeta, { color: theme.textSecondary }]}>{formatDate(entry.created_at)} · {entry.tier_percent}% · {entry.status}</Text>
+                  <Text style={[styles.ledgerMeta, { color: theme.textSecondary }]}>
+                    {formatDate(entry.created_at)} · {entry.tier_name ?? 'Legacy tier'} · {entry.tier_percent}% · {entry.status}
+                  </Text>
                 </View>
-                <Text style={styles.ledgerAmount}>R {entry.amount_rands.toFixed(2)}</Text>
+                <Text style={styles.ledgerAmount}>{formatMoney(entry.amount_minor_units, entry.currency)}</Text>
               </View>
             ))}
           </>
@@ -60,9 +68,14 @@ export default function WalletTab() {
           <>
             <View style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Available treatment credit</Text>
-              <Text style={styles.balanceValue}>{wallet.data ? `R ${wallet.data.credit_rands.toFixed(2)}` : '—'}</Text>
+              <Text style={styles.balanceValue}>{wallet.data ? formatMoney(wallet.data.credit_minor_units, wallet.data.currency) : '—'}</Text>
               <Text style={styles.balanceHint}>{wallet.data ? `${wallet.data.total_points.toLocaleString()} points` : 'Points balance'}</Text>
             </View>
+            {wallet.data?.legacy_zar_points ? (
+              <Text style={[styles.rate, { color: theme.textSecondary }]}>
+                Legacy ZAR balance: {wallet.data.legacy_zar_points.toLocaleString()} points · {formatMoney(wallet.data.legacy_zar_credit_minor_units, 'ZAR')}
+              </Text>
+            ) : null}
             {wallet.data?.points_rate_description ? <Text style={[styles.rate, { color: theme.textSecondary }]}>{wallet.data.points_rate_description}</Text> : null}
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Points history</Text>
             {wallet.isLoading ? <ActivityIndicator color="#3C9FFE" /> : null}
@@ -72,7 +85,9 @@ export default function WalletTab() {
               <View key={entry.id} style={[styles.ledgerRow, { backgroundColor: theme.backgroundElement }]}>
                 <View style={styles.ledgerCopy}>
                   <Text style={[styles.ledgerTitle, { color: theme.text }]}>{entry.description}</Text>
-                  <Text style={[styles.ledgerMeta, { color: theme.textSecondary }]}>{formatDate(entry.created_at)} · Balance {entry.balance_after} points</Text>
+                  <Text style={[styles.ledgerMeta, { color: theme.textSecondary }]}>
+                    {formatDate(entry.created_at)} · {entry.policy_version === 'inr_v1' ? 'Balance' : 'Legacy balance'} {entry.balance_after} points
+                  </Text>
                 </View>
                 <Text style={[styles.pointsAmount, entry.points < 0 && styles.reversedPoints]}>
                   {entry.points > 0 ? '+' : ''}{entry.points}

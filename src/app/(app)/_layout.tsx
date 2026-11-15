@@ -15,14 +15,17 @@ import { Redirect, Stack } from 'expo-router';
 import { useAuthStore } from '@/store/auth-store';
 
 export default function AppLayout() {
-  const { isAuthenticated, isHydrated } = useAuthStore();
+  const { isAuthenticated, isHydrated, user } = useAuthStore();
 
   // Still loading from SecureStore — render nothing to avoid a flash.
   if (!isHydrated) return null;
 
   // Belt-and-suspenders redirect (the root layout does this too).
   if (!isAuthenticated) {
-    return <Redirect href="/(auth)/login" />;
+    return <Redirect href="/(auth)" />;
+  }
+  if (user?.role === 'admin') {
+    return <Redirect href="/(admin)" />;
   }
 
   return (

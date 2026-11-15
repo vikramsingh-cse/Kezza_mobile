@@ -139,19 +139,21 @@ def request_otp(phone_e164: str, db: Session) -> str:
         raise RuntimeError("OTP delivery is unavailable: configure a production OTP provider")
 
     now = datetime.now(timezone.utc)
-    request_times = list(db.scalars(
-        select(OtpRequest.created_at)
+    request_times = list(db.execute(
+        select(OtpRequest.created_at, OtpRequest.is_verified)
         .where(
             OtpRequest.phone_e164 == phone_e164,
             OtpRequest.created_at >= now - OTP_REQUEST_WINDOW,
         )
-        .order_by(OtpRequest.created_at.asc())
+        .order_by(OtpRequest.created_at.asc(), OtpRequest.id.asc())
     ))
     if request_times:
-        most_recent = _as_utc(request_times[-1])
-        cooldown_remaining = math.ceil(
-            (most_recent + OTP_RESEND_COOLDOWN - now).total_seconds()
-        )
+        most_recent, was_verified = request_times[-1]
+        cooldown_remaining = 0
+        if not was_verified:
+            cooldown_remaining = math.ceil(
+                (_as_utc(most_recent) + OTP_RESEND_COOLDOWN - now).total_seconds()
+            )
         if cooldown_remaining > 0:
             raise OtpRequestRateLimited(cooldown_remaining)
         if len(request_times) >= OTP_MAX_REQUESTS_PER_WINDOW:
@@ -229,7 +231,7 @@ def build_user_profile(user: User, db: Session) -> dict:
     agent = db.scalars(select(Agent).where(Agent.user_id == user.id)).first()
     patient = db.scalars(select(Patient).where(Patient.user_id == user.id)).first()
 
-    role = "agent" if agent else "patient"
+    role = user.role
     agent_code = agent.agent_code if agent else None
 
     return {
@@ -255,7 +257,7 @@ def register_user(
 ) -> tuple[str, dict]:
     """
     Registers a new user as Patient or Agent.
-    If Patient registers with a referral_code, links and locks referral attribution!
+    Patient attribution comes from the referral code or an existing phone-matched lead.
     """
     user = get_user_by_phone(phone_e164, db)
     if not user:
@@ -263,6 +265,7 @@ def register_user(
             phone_e164=phone_e164,
             full_name=full_name,
             email=email,
+            role=role,
             is_active=True,
         )
         db.add(user)
@@ -271,12 +274,23 @@ def register_user(
     if role == "agent":
         agent = db.scalars(select(Agent).where(Agent.user_id == user.id)).first()
         if not agent:
+            sponsor_agent_id = None
+            if referral_code:
+                cleaned_code = referral_code.strip().upper()
+                sponsor = db.scalars(
+                    select(Agent).where(Agent.agent_code == cleaned_code)
+                ).first()
+                if not sponsor:
+                    raise ValueError("Referral code is invalid")
+                sponsor_agent_id = sponsor.id
+
             # Generate unique agent code (e.g. AGT-847291)
             code_suffix = secrets.token_hex(3).upper()
             code = f"AGT-{code_suffix}"
             agent = Agent(
                 user_id=user.id,
                 agent_code=code,
+                sponsor_agent_id=sponsor_agent_id,
                 status="active",
             )
             db.add(agent)
@@ -289,35 +303,43 @@ def register_user(
             db.add(patient)
             db.flush()
 
-        # Check referral attribution locking
+        # Lock attribution to an existing phone-matched lead when one exists.
+        existing_ref = db.scalars(
+            select(Referral)
+            .where(Referral.patient_phone_e164 == phone_e164)
+            .with_for_update()
+        ).first()
+        referring_agent = None
         if referral_code:
             referral_code_clean = referral_code.strip().upper()
             referring_agent = db.scalars(
                 select(Agent).where(Agent.agent_code == referral_code_clean)
             ).first()
-
             if not referring_agent:
                 raise ValueError("Referral code is invalid")
 
-            # An agent-created lead already owns attribution for this phone.
-            existing_ref = db.scalars(
-                select(Referral).where(Referral.patient_phone_e164 == phone_e164)
-            ).first()
-
-            if existing_ref:
-                if existing_ref.patient_user_id not in (None, user.id):
-                    raise ValueError("Referral attribution is already linked to another account")
-                existing_ref.patient_user_id = user.id
-                existing_ref.status = "registered"
-            else:
-                new_ref = Referral(
+        if existing_ref:
+            if existing_ref.patient_user_id not in (None, user.id):
+                raise ValueError("Referral attribution is already linked to another account")
+            if (
+                referring_agent
+                and existing_ref.referring_agent_id != referring_agent.id
+            ):
+                raise ValueError("Referral attribution is already locked to a different agent")
+            existing_ref.patient_user_id = user.id
+            existing_ref.patient_name = full_name
+            existing_ref.status = "registered"
+        elif referring_agent:
+            db.add(
+                Referral(
                     patient_user_id=user.id,
                     patient_name=full_name,
                     patient_phone_e164=phone_e164,
                     referring_agent_id=referring_agent.id,
                     status="registered",
                 )
-                db.add(new_ref)
+            )
+        if existing_ref or referring_agent:
             db.flush()
 
     db.commit()
@@ -357,3 +379,15 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired access token",
         )
+
+
+def get_current_admin(
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Require a provisioned, active administrator account."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required",
+        )
+    return current_user

@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth-store';
+import type { UserRole } from '@/store/auth-store';
 import type {
   AuthTokenResponse,
   OtpRequestBody,
@@ -21,7 +22,7 @@ export function useRequestOtp() {
 }
 
 /** Step 2: Verify the OTP */
-export function useVerifyOtp() {
+export function useVerifyOtp(requiredRole?: UserRole) {
   const signIn = useAuthStore((s) => s.signIn);
 
   return useMutation({
@@ -30,7 +31,12 @@ export function useVerifyOtp() {
       return response.data;
     },
     onSuccess: async (data) => {
-      if (data.status === 'success' && data.access_token && data.user) {
+      if (
+        data.status === 'success' &&
+        data.access_token &&
+        data.user &&
+        (!requiredRole || data.user.role === requiredRole)
+      ) {
         await signIn({
           accessToken: data.access_token,
           user: {

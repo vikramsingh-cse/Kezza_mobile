@@ -18,9 +18,9 @@ def get_patient_wallet_endpoint(
     """
     Step 7 (Patient): Patient views earned treatment credit and reward points ledger.
     """
-    if not current_user.get("patient_id"):
+    if current_user.get("role") != "patient" or not current_user.get("patient_id"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User does not have a patient profile",
         )
 
@@ -36,9 +36,9 @@ def get_agent_earnings_endpoint(
     """
     Step 7 (Agent): Agent views commission tier, pending/approved earnings, and commission ledger.
     """
-    if not current_user.get("agent_id"):
+    if current_user.get("role") != "agent" or not current_user.get("agent_id"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User does not have an agent profile",
         )
 

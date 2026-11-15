@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
-export type UserRole = 'patient' | 'agent';
+export type UserRole = 'patient' | 'agent' | 'admin';
 
 export interface AuthUser {
   id: string;

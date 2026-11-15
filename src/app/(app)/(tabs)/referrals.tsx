@@ -1,10 +1,11 @@
 import * as Clipboard from 'expo-clipboard';
+import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Spacing } from '@/constants/theme';
-import { usePatientAttribution, useAgentReferralCode, useAgentReferrals } from '@/features/referrals/hooks';
+import { useAgentReferralCode, useAgentReferrals, usePatientAttribution } from '@/features/referrals/hooks';
 import type { ReferralStatus } from '@/features/referrals/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
@@ -17,6 +18,15 @@ const statusLabel: Record<ReferralStatus, string> = {
   not_converted: 'Not converted',
   rejected: 'Closed',
 };
+
+function isReferralStatus(status: string): status is ReferralStatus {
+  return Object.prototype.hasOwnProperty.call(statusLabel, status);
+}
+
+function getStatusLabel(status?: string | null): string {
+  if (!status || !isReferralStatus(status)) return statusLabel.registered;
+  return statusLabel[status];
+}
 
 function ActionButton({ label, onPress, secondary = false }: { label: string; onPress: () => void; secondary?: boolean }) {
   return (
@@ -33,20 +43,23 @@ export default function ReferralsTab() {
   const referrals = useAgentReferrals();
   const attribution = usePatientAttribution();
   const [copied, setCopied] = useState(false);
+  const referralLink = code.data?.agent_code
+    ? Linking.createURL('/login', { queryParams: { ref: code.data.agent_code } })
+    : '';
   const isRefreshing = isAgent ? (code.isRefetching || referrals.isRefetching) : attribution.isRefetching;
 
   async function copyLink() {
-    if (!code.data?.referral_link) return;
-    await Clipboard.setStringAsync(code.data.referral_link);
+    if (!referralLink) return;
+    await Clipboard.setStringAsync(referralLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   }
 
   async function shareLink() {
-    if (!code.data?.referral_link) return;
+    if (!referralLink) return;
     await Share.share({
-      message: `Join Kezza with my referral link: ${code.data.referral_link}`,
-      url: code.data.referral_link,
+      message: `Join Kezza with my referral link: ${referralLink}`,
+      url: referralLink,
     });
   }
 
@@ -69,7 +82,7 @@ export default function ReferralsTab() {
             <View style={[styles.inviteCard, { backgroundColor: theme.backgroundElement }]}>
               <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>YOUR PERSONAL LINK</Text>
               <Text selectable style={[styles.code, { color: theme.text }]}>{code.data?.agent_code ?? 'Loading…'}</Text>
-              <Text selectable style={[styles.link, { color: theme.textSecondary }]}>{code.data?.referral_link ?? ''}</Text>
+              <Text selectable style={[styles.link, { color: theme.textSecondary }]}>{referralLink}</Text>
               <View style={styles.buttonRow}>
                 <ActionButton label={copied ? 'Copied' : 'Copy link'} onPress={copyLink} />
                 <ActionButton label="Share link" onPress={shareLink} secondary />
@@ -113,7 +126,7 @@ export default function ReferralsTab() {
               <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>REFERRED BY</Text>
               <Text style={[styles.code, { color: theme.text }]}>{attribution.data.referring_agent_code}</Text>
               <Text style={[styles.detail, { color: theme.textSecondary }]}>Your referral attribution is locked to this agent.</Text>
-              <Text style={styles.status}>{statusLabel[(attribution.data.status as ReferralStatus) ?? 'registered']}</Text>
+              <Text style={styles.status}>{getStatusLabel(attribution.data.status)}</Text>
               {attribution.data.converted_at ? <Text style={[styles.detail, { color: theme.textSecondary }]}>Treatment recorded {new Date(attribution.data.converted_at).toLocaleDateString()}</Text> : null}
             </View>
           ) : (

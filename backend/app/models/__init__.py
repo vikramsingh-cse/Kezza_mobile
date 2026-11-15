@@ -6,7 +6,7 @@ from app.models.agent import Agent
 from app.models.referral import Referral
 from app.models.payment import Payment
 from app.models.points import PointsLedger
-from app.models.commission import CommissionTier, CommissionLedger
+from app.models.commission import CommissionTier, CommissionLedger, LegacyCommissionTier
 from app.models.otp import OtpRequest
 
 __all__ = [
@@ -19,5 +19,6 @@ __all__ = [
     "PointsLedger",
     "CommissionTier",
     "CommissionLedger",
+    "LegacyCommissionTier",
     "OtpRequest",
 ]

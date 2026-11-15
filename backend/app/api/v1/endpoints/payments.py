@@ -55,7 +55,7 @@ def verify_collected_payment_endpoint(
         result = process_treatment_payment(
             patient_id=payload.patient_id,
             treatment_name=payload.treatment_name,
-            amount_rands=payload.amount_rands,
+            amount_rupees=payload.amount_rupees,
             payment_reference=payload.payment_reference,
             branch_id=payload.branch_id,
             db=db,
@@ -85,9 +85,9 @@ def get_payment_history(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user.get("patient_id"):
+    if current_user.get("role") != "patient" or not current_user.get("patient_id"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Patient profile required",
         )
 
@@ -103,11 +103,13 @@ def get_payment_history(
         {
             "id": str(p.id),
             "treatment_name": p.treatment_name,
-            "amount_rands": p.amount_cents / 100.0,
+            "amount_minor_units": p.amount_minor_units,
             "currency": p.currency,
             "status": p.status,
             "payment_reference": p.payment_reference,
             "verified_at": p.verified_at.isoformat() if p.verified_at else None,
+            "refunded_at": p.refunded_at.isoformat() if p.refunded_at else None,
+            "refund_reason": p.refund_reason,
             "created_at": p.created_at.isoformat() if p.created_at else "",
         }
         for p in payments

@@ -20,7 +20,7 @@ export interface UserProfileResponse {
   phone_e164: string;
   full_name: string;
   email: string | null;
-  role: 'patient' | 'agent';
+  role: 'patient' | 'agent' | 'admin';
   agent_code: string | null;
   patient_id: string | null;
   agent_id: string | null;

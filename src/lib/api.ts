@@ -16,7 +16,7 @@
  *  const { data } = await api.get<Referral[]>('/referrals');
  */
 
-import axios from 'axios';
+import { create } from 'axios';
 import { useAuthStore } from '@/store/auth-store';
 
 // Android devices must use the Mac's LAN address, never the device's localhost.
@@ -29,7 +29,7 @@ if (!baseHost || /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(baseHost))
   throw new Error('EXPO_PUBLIC_API_URL must use a reachable host, such as the Mac Wi-Fi IP, not localhost.');
 }
 
-export const api = axios.create({
+export const api = create({
   baseURL: BASE_URL,
   timeout: 10_000,
   headers: { 'Content-Type': 'application/json' },

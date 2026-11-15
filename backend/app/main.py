@@ -14,6 +14,7 @@ from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.referrals import router as referrals_router
 from app.api.v1.endpoints.payments import router as payments_router
 from app.api.v1.endpoints.wallet import router as wallet_router
+from app.api.v1.endpoints.admin import router as admin_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(referrals_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")
 app.include_router(wallet_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 
 
 @app.get("/")
